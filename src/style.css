@@ -202,6 +202,89 @@ label span {
   padding: 6px 0 0;
 }
 
+.attachment-panel {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.attachment-panel.compact {
+  margin-top: 2px;
+}
+
+.attachment-panel > div,
+.attachment-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.attachment-panel span {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.attachment-panel input[type="file"] {
+  background: #ffffff;
+  font-size: 13px;
+  min-height: 40px;
+  padding: 8px;
+}
+
+.attachment-list {
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.attachment-list-header,
+.attachment-item {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.attachment-list-header span,
+.attachment-list-header strong {
+  color: #334155;
+  font-size: 13px;
+}
+
+.attachment-item {
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.attachment-item strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.attachment-item p {
+  color: #64748b;
+  font-size: 13px;
+  margin: 3px 0 0;
+}
+
+.attachment-item.parsing {
+  border-color: #93c5fd;
+}
+
+.attachment-item.error {
+  border-color: #fecdd3;
+}
+
+.attachment-item button {
+  min-height: 32px;
+}
+
 .wide {
   grid-column: 1 / -1;
 }
@@ -498,6 +581,16 @@ textarea:focus {
   gap: 10px;
   grid-template-columns: 160px minmax(220px, 1fr) auto;
   margin-top: 12px;
+}
+
+.section-attachment {
+  margin-top: 12px;
+}
+
+.section-attachment-summary {
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 8px;
 }
 
 .ppt-preview {

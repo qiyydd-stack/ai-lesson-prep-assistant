@@ -1,5 +1,7 @@
 const REQUIRED_FIELDS = ["sectionTitle", "lessonContent"];
 
+import { buildAttachmentsContext } from "./attachmentsContext.js";
+
 export function validateSectionRegenerationRequest(input) {
   return REQUIRED_FIELDS.filter((field) => !String(input?.[field] ?? "").trim()).map(
     (field) => `${field} is required`,
@@ -9,6 +11,10 @@ export function validateSectionRegenerationRequest(input) {
 export function buildSectionRegenerationPrompt(input) {
   const extraInstruction = String(input.extraInstruction || "保持原教案整体风格，提升可执行性。").trim();
   const lessonContent = String(input.lessonContent || "").slice(0, 12000);
+  const attachmentsContext = buildAttachmentsContext(input.attachmentsContext, {
+    maxItems: 6,
+    maxTextLength: 4000,
+  });
 
   return `请只重写下列教案中的一个章节：${input.sectionTitle}
 
@@ -19,6 +25,7 @@ export function buildSectionRegenerationPrompt(input) {
 
 重写要求：
 ${extraInstruction}
+${attachmentsContext ? `\n${attachmentsContext}\n` : ""}
 
 原教案：
 ${lessonContent}

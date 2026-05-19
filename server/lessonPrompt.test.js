@@ -62,6 +62,29 @@ test("buildLessonPrompt includes generation settings and school template", () =>
   assert.match(prompt, /教材分析/);
 });
 
+test("buildLessonPrompt includes extracted attachment context", () => {
+  const prompt = buildLessonPrompt({
+    subject: "数学",
+    grade: "七年级",
+    chapter: "一元一次方程",
+    duration: "1课时",
+    teachingType: "习题课",
+    teachingStyle: "严谨清晰",
+    attachmentsContext: [
+      {
+        name: "练习册题目.png",
+        sourceArea: "课后作业题",
+        summary: "包含三道一元一次方程练习",
+        extractedText: "1. 解方程 2x+3=7",
+      },
+    ],
+  });
+
+  assert.match(prompt, /补充资料上下文/);
+  assert.match(prompt, /练习册题目\.png/);
+  assert.match(prompt, /解方程 2x\+3=7/);
+});
+
 test("getTeachingTypePrompt returns exam review guidance", () => {
   const prompt = getTeachingTypePrompt({ teachingType: "考前复习课" });
 

@@ -110,6 +110,8 @@ const result = ref("");
 const lessonBlocks = ref([]);
 const activeBlockTitle = ref("");
 const copied = ref(false);
+const attachments = ref([]);
+const attachmentError = ref("");
 const pptLoading = ref(false);
 const pptDownloading = ref(false);
 const pptError = ref("");
@@ -132,6 +134,8 @@ const taskStepIndex = ref(0);
 const taskDetail = ref("");
 const taskQueue = ref([]);
 let taskTimer = null;
+const attachmentAccept =
+  ".txt,.md,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,image/png,image/jpeg,image/webp";
 
 const canSubmit = computed(
   () =>
@@ -166,6 +170,17 @@ const reusableSnippets = computed(() => {
     targets.some((target) => block.title.includes(target) || block.content.includes(target)),
   );
 });
+
+const parsedAttachmentContexts = computed(() =>
+  attachments.value
+    .filter((attachment) => attachment.status === "done" && (attachment.extractedText || attachment.summary))
+    .map((attachment) => ({
+      name: attachment.name,
+      sourceArea: attachment.sourceArea,
+      summary: attachment.summary,
+      extractedText: attachment.extractedText,
+    })),
+);
 
 const taskTitle = computed(() => {
   if (activeTask.value === "lesson") return "正在生成备课方案";
@@ -244,6 +259,73 @@ async function copyBlock(block) {
   await navigator.clipboard.writeText(`# ${block.title}\n${block.content}`.trim());
 }
 
+async function uploadReferenceFiles(event, sourceArea) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  attachmentError.value = "";
+
+  for (const file of files) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    attachments.value = [
+      {
+        id,
+        name: file.name,
+        sourceArea,
+        status: "parsing",
+        summary: "",
+        extractedText: "",
+        error: "",
+      },
+      ...attachments.value,
+    ];
+
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const response = await fetch("/api/parse-attachment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          sourceArea,
+          fileBase64,
+          apiConfig,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "资料解析失败，请换一个文件重试。");
+      }
+      const parsed = data.attachment || {};
+      attachments.value = attachments.value.map((attachment) =>
+        attachment.id === id
+          ? {
+              ...attachment,
+              status: "done",
+              summary: parsed.summary || "",
+              extractedText: parsed.extractedText || "",
+            }
+          : attachment,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "资料解析失败，请换一个文件重试。";
+      attachmentError.value = message;
+      attachments.value = attachments.value.map((attachment) =>
+        attachment.id === id ? { ...attachment, status: "error", error: message } : attachment,
+      );
+    }
+  }
+
+  event.target.value = "";
+}
+
+function removeAttachment(id) {
+  attachments.value = attachments.value.filter((attachment) => attachment.id !== id);
+}
+
+function attachmentsByArea(sourceArea) {
+  return attachments.value.filter((attachment) => attachment.sourceArea === sourceArea);
+}
+
 function fillExample() {
   Object.assign(form, {
     subject: "语文",
@@ -289,6 +371,8 @@ function resetAll() {
   copied.value = false;
   taskDetail.value = "";
   taskQueue.value = [];
+  attachments.value = [];
+  attachmentError.value = "";
 }
 
 function clearPptTemplate() {
@@ -405,6 +489,7 @@ async function generateLesson() {
       body: JSON.stringify({
         ...form,
         apiConfig,
+        attachmentsContext: parsedAttachmentContexts.value,
       }),
     });
 
@@ -468,6 +553,7 @@ async function generatePptOutline() {
         ...form,
         apiConfig,
         lessonContent: latestLessonMarkdown.value,
+        attachmentsContext: parsedAttachmentContexts.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -545,6 +631,7 @@ async function regenerateSection() {
         sectionTitle: sectionForm.sectionTitle,
         extraInstruction: sectionForm.extraInstruction,
         lessonContent: latestLessonMarkdown.value,
+        attachmentsContext: parsedAttachmentContexts.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -659,6 +746,17 @@ async function regenerateSection() {
               placeholder="如：实验探究课、公开课展示课、跨学科项目课、低年级游戏化课堂、错题讲评课等。"
             />
           </label>
+          <section v-if="form.teachingType === '自定义'" class="wide attachment-panel">
+            <div>
+              <span>上传教学类型资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, '自定义教学类型')"
+              />
+            </div>
+          </section>
 
           <label>
             <span>教学风格</span>
@@ -675,6 +773,17 @@ async function regenerateSection() {
               placeholder="如：班主任式陪伴、竞赛教练式推进、低龄儿童故事化表达、轻松幽默但节奏紧凑等。"
             />
           </label>
+          <section v-if="form.teachingStyle === '自定义'" class="wide attachment-panel">
+            <div>
+              <span>上传教学风格资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, '自定义教学风格')"
+              />
+            </div>
+          </section>
 
           <label class="wide">
             <span>学情补充</span>
@@ -684,6 +793,17 @@ async function regenerateSection() {
               placeholder="补充学生基础、课堂特点、分层需求等"
             />
           </label>
+          <section class="wide attachment-panel">
+            <div>
+              <span>上传学情资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, '学情补充')"
+              />
+            </div>
+          </section>
 
           <section class="wide option-block">
             <span>可选生成项</span>
@@ -703,6 +823,15 @@ async function regenerateSection() {
               v-model="form.customFeatureTags"
               placeholder="补充自定义生成要求，如：加入实验安全提醒、加入中考真题、加入小组评价表"
             />
+            <div v-if="form.featureTags.includes('自定义')" class="attachment-panel compact">
+              <span>上传自定义要求资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, '自定义生成要求')"
+              />
+            </div>
           </section>
 
           <section class="wide option-block template-import-block">
@@ -746,6 +875,43 @@ async function regenerateSection() {
                 >{{slide_1_bullet_1}}</code
               >。
             </p>
+            <div class="attachment-panel compact">
+              <span>上传校本参考资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, '模板导入')"
+              />
+            </div>
+          </section>
+
+          <section v-if="attachments.length" class="wide attachment-list">
+            <div class="attachment-list-header">
+              <span>已解析资料</span>
+              <strong>{{ parsedAttachmentContexts.length }} / {{ attachments.length }}</strong>
+            </div>
+            <article
+              v-for="attachment in attachments"
+              :key="attachment.id"
+              :class="['attachment-item', attachment.status]"
+            >
+              <div>
+                <strong>{{ attachment.name }}</strong>
+                <p>
+                  {{ attachment.sourceArea }} ·
+                  {{
+                    attachment.status === "parsing"
+                      ? "解析中"
+                      : attachment.status === "done"
+                        ? attachment.summary || "已解析"
+                        : attachment.error
+                  }}
+                </p>
+              </div>
+              <button type="button" @click="removeAttachment(attachment.id)">移除</button>
+            </article>
+            <p v-if="attachmentError" class="error-message">{{ attachmentError }}</p>
           </section>
 
           <div class="actions wide">
@@ -816,6 +982,23 @@ async function regenerateSection() {
               <button type="button" :disabled="sectionLoading" @click="regenerateSection">
                 {{ sectionLoading ? "重写中..." : "重新生成该部分" }}
               </button>
+            </div>
+            <div class="attachment-panel section-attachment">
+              <span>上传局部重写参考资料</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadReferenceFiles($event, `局部重写-${sectionForm.sectionTitle}`)"
+              />
+            </div>
+            <div v-if="attachmentsByArea(`局部重写-${sectionForm.sectionTitle}`).length" class="section-attachment-summary">
+              当前章节参考资料：
+              {{
+                attachmentsByArea(`局部重写-${sectionForm.sectionTitle}`)
+                  .map((attachment) => attachment.name)
+                  .join("、")
+              }}
             </div>
             <p v-if="sectionError" class="error-message">{{ sectionError }}</p>
           </section>

@@ -10,6 +10,7 @@ import { pipeOpenAIStream } from "./openAIStream.js";
 import { buildPptOutlinePrompt, normalizePptOutline, parseJsonObject } from "./pptOutline.js";
 import { buildPptxBuffer, safeFileName } from "./pptxBuilder.js";
 import { extractPlaceholders, fillPptxTemplate } from "./pptxTemplate.js";
+import { parseAttachment } from "./attachmentParser.js";
 import {
   buildSectionRegenerationPrompt,
   validateSectionRegenerationRequest,
@@ -230,6 +231,17 @@ app.post("/api/inspect-pptx-template", async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       error: error instanceof Error ? error.message : "模板解析失败，请检查 PPTX 文件。",
+    });
+  }
+});
+
+app.post("/api/parse-attachment", async (req, res) => {
+  try {
+    const attachment = await parseAttachment(req.body);
+    return res.json({ attachment });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error instanceof Error ? error.message : "资料解析失败，请检查文件后重试。",
     });
   }
 });
