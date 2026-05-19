@@ -1,6 +1,15 @@
 <script setup>
 import { computed, onUnmounted, reactive, ref } from "vue";
 import { marked } from "marked";
+import {
+  appendTaskOutput,
+  buildLessonMarkdown,
+  createTask,
+  failTask,
+  finishTask,
+  parseLessonBlocks,
+  replaceLessonBlock,
+} from "./lessonWorkspace.js";
 
 const teachingTypes = [
   "严谨讲授课",
@@ -98,6 +107,8 @@ const showApiConfig = ref(!apiConfig.apiKey);
 const loading = ref(false);
 const error = ref("");
 const result = ref("");
+const lessonBlocks = ref([]);
+const activeBlockTitle = ref("");
 const copied = ref(false);
 const pptLoading = ref(false);
 const pptDownloading = ref(false);
@@ -116,8 +127,10 @@ const sectionForm = reactive({
   extraInstruction: "",
 });
 const activeTask = ref(null);
+const activeTaskId = ref("");
 const taskStepIndex = ref(0);
 const taskDetail = ref("");
+const taskQueue = ref([]);
 let taskTimer = null;
 
 const canSubmit = computed(
@@ -130,9 +143,28 @@ const canSubmit = computed(
     form.teachingStyle.trim(),
 );
 
+const latestLessonMarkdown = computed(() => {
+  if (lessonBlocks.value.length) return buildLessonMarkdown(lessonBlocks.value);
+  return result.value;
+});
+
 const renderedResult = computed(() => {
-  if (!result.value) return "";
-  return marked.parse(result.value, { breaks: true });
+  if (!latestLessonMarkdown.value) return "";
+  return marked.parse(latestLessonMarkdown.value, { breaks: true });
+});
+
+const activeLessonBlock = computed(() => {
+  if (!lessonBlocks.value.length) return null;
+  return lessonBlocks.value.find((block) => block.title === activeBlockTitle.value) || lessonBlocks.value[0];
+});
+
+const recentTasks = computed(() => taskQueue.value.slice(0, 5));
+
+const reusableSnippets = computed(() => {
+  const targets = ["教学目标", "课堂互动问题", "课后作业题", "板书设计", "课堂评价"];
+  return lessonBlocks.value.filter((block) =>
+    targets.some((target) => block.title.includes(target) || block.content.includes(target)),
+  );
 });
 
 const taskTitle = computed(() => {
@@ -150,6 +182,9 @@ const taskText = computed(() => {
 
 function startTask(task) {
   stopTask();
+  const queuedTask = createTask(task, taskTitleByType(task));
+  taskQueue.value = [queuedTask, ...taskQueue.value].slice(0, 8);
+  activeTaskId.value = queuedTask.id;
   activeTask.value = task;
   taskStepIndex.value = 0;
   taskDetail.value = "";
@@ -157,18 +192,57 @@ function startTask(task) {
     const steps = taskSteps[task] || [];
     taskStepIndex.value = Math.min(taskStepIndex.value + 1, steps.length - 1);
   }, 2200);
+  return queuedTask.id;
 }
 
-function stopTask(finalDetail = "") {
+function stopTask(finalDetail = "", status = "done") {
   if (taskTimer) {
     window.clearInterval(taskTimer);
     taskTimer = null;
   }
+  if (activeTaskId.value) {
+    taskQueue.value =
+      status === "error"
+        ? failTask(taskQueue.value, activeTaskId.value, finalDetail)
+        : finishTask(taskQueue.value, activeTaskId.value, finalDetail);
+  }
   taskDetail.value = finalDetail;
   activeTask.value = null;
+  activeTaskId.value = "";
 }
 
 onUnmounted(() => stopTask());
+
+function taskTitleByType(task) {
+  if (task === "lesson") return "生成备课方案";
+  if (task === "ppt") return "生成 PPT 预览";
+  if (task === "pptx") return "导出 PPTX";
+  if (task === "section") return `重写${sectionForm.sectionTitle}`;
+  return "处理任务";
+}
+
+function updateActiveTaskOutput(chunk) {
+  if (!activeTaskId.value) return;
+  taskQueue.value = appendTaskOutput(taskQueue.value, activeTaskId.value, chunk);
+}
+
+function syncLessonBlocksFromMarkdown(markdown) {
+  lessonBlocks.value = parseLessonBlocks(markdown);
+  activeBlockTitle.value = lessonBlocks.value[0]?.title || "";
+}
+
+function updateLessonBlock(title, content) {
+  lessonBlocks.value = lessonBlocks.value.map((block) =>
+    block.title === title ? { ...block, content } : block,
+  );
+  result.value = buildLessonMarkdown(lessonBlocks.value);
+  pptOutline.value = null;
+}
+
+async function copyBlock(block) {
+  if (!block) return;
+  await navigator.clipboard.writeText(`# ${block.title}\n${block.content}`.trim());
+}
 
 function fillExample() {
   Object.assign(form, {
@@ -207,11 +281,14 @@ function resetAll() {
     studentContext: "",
   });
   result.value = "";
+  lessonBlocks.value = [];
+  activeBlockTitle.value = "";
   pptOutline.value = null;
   pptError.value = "";
   error.value = "";
   copied.value = false;
   taskDetail.value = "";
+  taskQueue.value = [];
 }
 
 function clearPptTemplate() {
@@ -289,19 +366,6 @@ async function inspectPptxTemplateFile(file) {
   pptTemplate.placeholders = data.placeholders || [];
 }
 
-function replaceMarkdownSection(markdown, sectionTitle, replacement) {
-  const title = escapeRegExp(sectionTitle);
-  const pattern = new RegExp(`(^#\\s*${title}\\s*\\n)([\\s\\S]*?)(?=^#\\s+|\\s*$)`, "m");
-  if (pattern.test(markdown)) {
-    return markdown.replace(pattern, `${replacement.trim()}\n\n`);
-  }
-  return `${markdown.trim()}\n\n${replacement.trim()}\n`;
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 async function readError(response) {
   const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -326,6 +390,8 @@ async function generateLesson() {
   loading.value = true;
   error.value = "";
   result.value = "";
+  lessonBlocks.value = [];
+  activeBlockTitle.value = "";
   pptOutline.value = null;
   pptError.value = "";
   copied.value = false;
@@ -356,23 +422,26 @@ async function generateLesson() {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      result.value += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      result.value += chunk;
+      updateActiveTaskOutput(chunk);
       taskDetail.value = `已生成约 ${result.value.length} 字`;
     }
 
     result.value += decoder.decode();
+    syncLessonBlocksFromMarkdown(result.value);
     stopTask(`备课方案已生成，约 ${result.value.length} 字`);
   } catch (err) {
     error.value = err instanceof Error ? err.message : "生成失败，请稍后重试。";
-    stopTask("生成失败，请检查配置后重试");
+    stopTask("生成失败，请检查配置后重试", "error");
   } finally {
     loading.value = false;
   }
 }
 
 async function copyResult() {
-  if (!result.value) return;
-  await navigator.clipboard.writeText(result.value);
+  if (!latestLessonMarkdown.value) return;
+  await navigator.clipboard.writeText(latestLessonMarkdown.value);
   copied.value = true;
   window.setTimeout(() => {
     copied.value = false;
@@ -380,7 +449,7 @@ async function copyResult() {
 }
 
 async function generatePptOutline() {
-  if (!result.value) {
+  if (!latestLessonMarkdown.value) {
     pptError.value = "请先生成备课方案。";
     return;
   }
@@ -398,7 +467,7 @@ async function generatePptOutline() {
       body: JSON.stringify({
         ...form,
         apiConfig,
-        lessonContent: result.value,
+        lessonContent: latestLessonMarkdown.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -411,7 +480,7 @@ async function generatePptOutline() {
     stopTask(`PPT 预览已生成，共 ${pptOutline.value?.slides?.length || 0} 页`);
   } catch (err) {
     pptError.value = err instanceof Error ? err.message : "PPT 大纲生成失败，请稍后重试。";
-    stopTask("PPT 预览生成失败，请检查配置后重试");
+    stopTask("PPT 预览生成失败，请检查配置后重试", "error");
   } finally {
     pptLoading.value = false;
   }
@@ -450,14 +519,14 @@ async function downloadPptx() {
     stopTask("PPTX 已准备完成");
   } catch (err) {
     pptError.value = err instanceof Error ? err.message : "PPTX 导出失败，请稍后重试。";
-    stopTask("PPTX 导出失败，请稍后重试");
+    stopTask("PPTX 导出失败，请稍后重试", "error");
   } finally {
     pptDownloading.value = false;
   }
 }
 
 async function regenerateSection() {
-  if (!result.value) {
+  if (!latestLessonMarkdown.value) {
     sectionError.value = "请先生成备课方案。";
     return;
   }
@@ -475,7 +544,7 @@ async function regenerateSection() {
         apiConfig,
         sectionTitle: sectionForm.sectionTitle,
         extraInstruction: sectionForm.extraInstruction,
-        lessonContent: result.value,
+        lessonContent: latestLessonMarkdown.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -483,12 +552,14 @@ async function regenerateSection() {
       throw new Error(data.error || "局部重写失败，请稍后重试。");
     }
 
-    result.value = replaceMarkdownSection(result.value, data.sectionTitle, data.content);
+    lessonBlocks.value = replaceLessonBlock(lessonBlocks.value, data.sectionTitle, data.content);
+    result.value = buildLessonMarkdown(lessonBlocks.value);
+    activeBlockTitle.value = data.sectionTitle;
     pptOutline.value = null;
     stopTask(`${data.sectionTitle} 已更新，PPT 预览需重新生成`);
   } catch (err) {
     sectionError.value = err instanceof Error ? err.message : "局部重写失败，请稍后重试。";
-    stopTask("局部重写失败，请稍后重试");
+    stopTask("局部重写失败，请稍后重试", "error");
   } finally {
     sectionLoading.value = false;
   }
@@ -695,7 +766,7 @@ async function regenerateSection() {
             <p class="eyebrow">生成结果</p>
             <h2>{{ form.chapter || "待生成备课方案" }}</h2>
           </div>
-          <button class="copy-button" type="button" :disabled="!result" @click="copyResult">
+          <button class="copy-button" type="button" :disabled="!latestLessonMarkdown" @click="copyResult">
             {{ copied ? "已复制" : "复制" }}
           </button>
         </div>
@@ -709,7 +780,23 @@ async function regenerateSection() {
           <div v-if="activeTask" class="task-bar"></div>
         </section>
 
-        <template v-if="result">
+        <section v-if="recentTasks.length" class="task-queue">
+          <div class="task-queue-header">
+            <p class="eyebrow">任务队列</p>
+            <span>{{ recentTasks.length }} 个最近任务</span>
+          </div>
+          <div class="task-list">
+            <article v-for="task in recentTasks" :key="task.id" :class="['task-item', task.status]">
+              <div>
+                <strong>{{ task.title }}</strong>
+                <p>{{ task.detail || "任务处理中" }}</p>
+              </div>
+              <span>{{ task.status === "running" ? "进行中" : task.status === "done" ? "完成" : "失败" }}</span>
+            </article>
+          </div>
+        </section>
+
+        <template v-if="latestLessonMarkdown">
 
           <section class="section-regenerate">
             <div>
@@ -731,6 +818,54 @@ async function regenerateSection() {
               </button>
             </div>
             <p v-if="sectionError" class="error-message">{{ sectionError }}</p>
+          </section>
+
+          <section v-if="lessonBlocks.length" class="content-workbench">
+            <div class="workbench-header">
+              <div>
+                <p class="eyebrow">内容工作台</p>
+                <h3>分块编辑与复用</h3>
+              </div>
+              <span>{{ lessonBlocks.length }} 个内容块已同步到 PPT 与局部重写</span>
+            </div>
+
+            <div class="block-tabs">
+              <button
+                v-for="block in lessonBlocks"
+                :key="block.title"
+                type="button"
+                :class="{ selected: activeLessonBlock?.title === block.title }"
+                @click="activeBlockTitle = block.title"
+              >
+                {{ block.title }}
+              </button>
+            </div>
+
+            <article v-if="activeLessonBlock" class="block-editor">
+              <div class="block-editor-header">
+                <h4>{{ activeLessonBlock.title }}</h4>
+                <button type="button" @click="copyBlock(activeLessonBlock)">复制该块</button>
+              </div>
+              <textarea
+                :value="activeLessonBlock.content"
+                rows="10"
+                @input="updateLessonBlock(activeLessonBlock.title, $event.target.value)"
+              />
+            </article>
+
+            <div v-if="reusableSnippets.length" class="reuse-panel">
+              <p class="eyebrow">可复用片段</p>
+              <div>
+                <button
+                  v-for="block in reusableSnippets"
+                  :key="`reuse-${block.title}`"
+                  type="button"
+                  @click="copyBlock(block)"
+                >
+                  复制{{ block.title }}
+                </button>
+              </div>
+            </div>
           </section>
 
           <div class="ppt-actions">
