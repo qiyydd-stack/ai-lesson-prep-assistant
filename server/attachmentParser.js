@@ -2,6 +2,7 @@ import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 
 import { resolveModelConfig } from "./modelConfig.js";
+import { cleanModelOutput, looksLikeMissingImageResponse } from "./modelOutput.js";
 
 const TEXT_EXTENSIONS = new Set([".txt", ".md"]);
 const WORD_EXTENSIONS = new Set([".docx"]);
@@ -109,6 +110,13 @@ export async function parseImageAttachment({ fileName, sourceArea, buffer, exten
     throw error;
   }
 
+  const support = isImageRecognitionSupported(modelConfig);
+  if (!support.supported) {
+    const error = new Error(support.reason);
+    error.statusCode = 400;
+    throw error;
+  }
+
   const mimeType = extension === ".jpg" ? "image/jpeg" : `image/${extension.slice(1)}`;
   const response = await fetch(`${modelConfig.baseUrl}/chat/completions`, {
     method: "POST",
@@ -147,15 +155,20 @@ export async function parseImageAttachment({ fileName, sourceArea, buffer, exten
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data?.error?.message || "图片识别失败，请检查模型是否支持视觉输入。");
+    const error = new Error(normalizeImageRecognitionError(data));
     error.statusCode = response.status;
     throw error;
   }
 
-  const text = String(data?.choices?.[0]?.message?.content || "").trim();
+  const text = cleanModelOutput(data?.choices?.[0]?.message?.content || "");
   if (!text) {
     const error = new Error("图片识别结果为空，请换一张更清晰的图片。");
     error.statusCode = 502;
+    throw error;
+  }
+  if (looksLikeMissingImageResponse(text)) {
+    const error = new Error("图片没有被当前模型接口正确接收。请换用支持视觉输入的模型，或先把图片题目转成文字/Word 后再上传。");
+    error.statusCode = 422;
     throw error;
   }
 
@@ -182,6 +195,36 @@ function summarizeText(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 180);
+}
+
+export function normalizeImageRecognitionError(data) {
+  const rawMessage = String(data?.error?.message || data?.message || "");
+  if (/image_url|vision|image input|expected [`'"]?text/i.test(rawMessage)) {
+    return "当前模型接口不支持图片识别。请在右上角模型配置中换成支持视觉输入的模型，或先把图片题目转成文字/Word 后再上传。";
+  }
+  return rawMessage || "图片识别失败，请检查模型是否支持视觉输入。";
+}
+
+export function isImageRecognitionSupported(modelConfig) {
+  const baseUrl = String(modelConfig?.baseUrl || "").toLowerCase();
+  const model = String(modelConfig?.model || "");
+  const lowerModel = model.toLowerCase();
+
+  if (baseUrl.includes("api.minimaxi.com") && /^minimax-m2(?:\.|$)/i.test(model)) {
+    return {
+      supported: false,
+      reason: `当前配置的 ${model || "MiniMax-M2"} 是 MiniMax 文本推理模型，不支持直接识别图片。请上传 Word/Excel/txt/md，或换用支持视觉输入的模型。`,
+    };
+  }
+
+  if (lowerModel.includes("text") && !lowerModel.includes("vision")) {
+    return {
+      supported: false,
+      reason: "当前模型看起来是文本模型，不支持直接识别图片。请换用支持视觉输入的模型，或先把图片转成文字资料。",
+    };
+  }
+
+  return { supported: true, reason: "" };
 }
 
 function getExtension(fileName) {

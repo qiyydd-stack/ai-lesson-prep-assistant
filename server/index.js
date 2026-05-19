@@ -11,6 +11,7 @@ import { buildPptOutlinePrompt, normalizePptOutline, parseJsonObject } from "./p
 import { buildPptxBuffer, safeFileName } from "./pptxBuilder.js";
 import { extractPlaceholders, fillPptxTemplate } from "./pptxTemplate.js";
 import { parseAttachment } from "./attachmentParser.js";
+import { cleanModelOutput } from "./modelOutput.js";
 import {
   buildSectionRegenerationPrompt,
   validateSectionRegenerationRequest,
@@ -125,7 +126,7 @@ app.post("/api/generate-ppt-outline", async (req, res) => {
       });
     }
 
-    const content = data?.choices?.[0]?.message?.content;
+    const content = cleanModelOutput(data?.choices?.[0]?.message?.content);
     const outline = normalizePptOutline(parseJsonObject(content));
     return res.json({ outline });
   } catch (error) {
@@ -175,7 +176,7 @@ app.post("/api/regenerate-section", async (req, res) => {
       });
     }
 
-    const content = data?.choices?.[0]?.message?.content?.trim();
+    const content = cleanModelOutput(data?.choices?.[0]?.message?.content);
     if (!content) {
       return res.status(502).json({ error: "模型返回内容为空，请重试。" });
     }
