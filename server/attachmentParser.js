@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 
 import { resolveModelConfig } from "./modelConfig.js";
 import { cleanModelOutput, looksLikeMissingImageResponse } from "./modelOutput.js";
+import { runLocalOcr, shouldPreferLocalOcr } from "./ocrRunner.js";
 
 const TEXT_EXTENSIONS = new Set([".txt", ".md"]);
 const WORD_EXTENSIONS = new Set([".docx"]);
@@ -52,7 +53,13 @@ export async function parseAttachment(input) {
   }
 
   if (IMAGE_EXTENSIONS.has(extension)) {
-    return parseImageAttachment({ fileName, sourceArea, buffer, extension, apiConfig: input.apiConfig });
+    return parseImageAttachment({
+      fileName,
+      sourceArea,
+      buffer,
+      extension,
+      apiConfig: input.apiConfig,
+    });
   }
 
   throw new Error("Unsupported attachment type.");
@@ -102,8 +109,38 @@ export function parseWorkbookAttachment({ fileName, sourceArea, buffer }) {
   });
 }
 
-export async function parseImageAttachment({ fileName, sourceArea, buffer, extension, apiConfig }) {
+export async function parseImageAttachment({
+  fileName,
+  sourceArea,
+  buffer,
+  extension,
+  apiConfig,
+  localOcrRunner = runLocalOcr,
+}) {
   const modelConfig = resolveModelConfig(apiConfig);
+  const preferLocalOcr =
+    shouldPreferLocalOcr(modelConfig) || modelConfig.error === "missing_api_key";
+
+  if (preferLocalOcr) {
+    try {
+      const ocrResult = await localOcrRunner({ buffer, extension });
+      return buildParsedAttachment({
+        fileName,
+        sourceArea,
+        extractedText: ocrResult.text,
+        summary: `本地 OCR 识别：${summarizeText(ocrResult.text)}`,
+      });
+    } catch (ocrError) {
+      if (modelConfig.error === "missing_api_key" || shouldPreferLocalOcr(modelConfig)) {
+        const error = new Error(
+          `本地 OCR 识别失败：${ocrError instanceof Error ? ocrError.message : "未知错误"}。请安装 RapidOCR 或上传文字版资料。`,
+        );
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+  }
+
   if (modelConfig.error === "missing_api_key") {
     const error = new Error("识别图片需要先在页面右上角配置支持视觉能力的模型 API Key。");
     error.statusCode = 400;

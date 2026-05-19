@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   isImageRecognitionSupported,
   normalizeImageRecognitionError,
+  parseImageAttachment,
   parseTextLikeAttachment,
   parseWorkbookAttachment,
   validateAttachmentInput,
@@ -61,4 +62,21 @@ test("isImageRecognitionSupported rejects MiniMax text model configuration", () 
 
   assert.equal(support.supported, false);
   assert.match(support.reason, /MiniMax-M2.7/);
+});
+
+test("parseImageAttachment uses local OCR before model vision", async () => {
+  const parsed = await parseImageAttachment({
+    fileName: "练习册.png",
+    sourceArea: "局部重写",
+    buffer: Buffer.from("fake"),
+    extension: ".png",
+    apiConfig: {
+      baseUrl: "https://api.minimaxi.com/v1",
+      model: "MiniMax-M2.7",
+    },
+    localOcrRunner: async () => ({ text: "1. 解方程 2x+3=7", engine: "rapidocr" }),
+  });
+
+  assert.match(parsed.extractedText, /解方程/);
+  assert.equal(parsed.type, "png");
 });

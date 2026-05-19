@@ -13,7 +13,7 @@
 - 将生成后的 Markdown 教案自动拆成可编辑内容块，编辑后同步给复制、PPT 生成和局部重写
 - 支持按内容块复制教学目标、课堂互动问题、课后作业题等片段，方便二次复用
 - 所有关键文字输入区支持上传参考资料，支持 `.txt`、`.md`、`.docx`、`.xlsx`、`.xls`、`.csv` 和常见图片格式
-- Word/Excel/文本资料会自动提取文字；练习册、试卷等图片会调用支持视觉能力的 OpenAI 兼容模型识别题目
+- Word/Excel/文本资料会自动提取文字；练习册、试卷等图片优先调用本地 RapidOCR 识别题目，必要时再走支持视觉能力的 OpenAI 兼容模型
 - 支持局部重新生成教学目标、重难点分析、教案框架、课堂互动问题和课后作业题
 - 可在前端页面配置 OpenAI 兼容接口的 API Key、Base URL 和模型名
 - 调用本地后端代理，以流式方式生成 Markdown 备课方案
@@ -26,6 +26,7 @@
 
 ```bash
 npm install
+python -m pip install rapidocr-onnxruntime
 Copy-Item .env.example .env
 npm run server
 npm run dev
@@ -46,7 +47,7 @@ PORT=3001
 
 后端默认地址：`http://localhost:3001`
 
-图片资料识别需要当前配置的模型支持视觉输入。`.exe`、脚本和安装包等可执行文件不会被解析。
+图片资料优先使用本地 RapidOCR，不依赖文本模型的视觉能力；如果本地 OCR 不可用，才会尝试支持视觉输入的模型接口。`.exe`、脚本和安装包等可执行文件不会被解析。
 
 ## 验证
 
