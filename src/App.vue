@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onUnmounted, reactive, ref } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { marked } from "marked";
 import {
   appendTaskOutput,
@@ -97,6 +97,7 @@ const form = reactive({
 
 const savedApiConfig = JSON.parse(localStorage.getItem("lessonPrepApiConfig") || "{}");
 const savedSchoolResources = JSON.parse(localStorage.getItem("lessonPrepSchoolResources") || "[]");
+const savedAuth = JSON.parse(localStorage.getItem("lessonPrepAuth") || "{}");
 
 const apiConfig = reactive({
   apiKey: savedApiConfig.apiKey || "",
@@ -105,6 +106,16 @@ const apiConfig = reactive({
 });
 
 const showApiConfig = ref(!apiConfig.apiKey);
+const authMode = ref("login");
+const authLoading = ref(false);
+const authError = ref("");
+const currentUser = ref(savedAuth.user || null);
+const authToken = ref(savedAuth.token || "");
+const authForm = reactive({
+  name: "",
+  email: "",
+  password: "",
+});
 const loading = ref(false);
 const error = ref("");
 const result = ref("");
@@ -149,6 +160,8 @@ const canSubmit = computed(
     form.teachingType.trim() &&
     form.teachingStyle.trim(),
 );
+
+const isAuthenticated = computed(() => Boolean(currentUser.value && authToken.value));
 
 const latestLessonMarkdown = computed(() => {
   if (lessonBlocks.value.length) return buildLessonMarkdown(lessonBlocks.value);
@@ -209,6 +222,62 @@ const taskText = computed(() => {
   return taskSteps[activeTask.value][taskStepIndex.value] || taskSteps[activeTask.value][0];
 });
 
+function authHeaders(extra = {}) {
+  return {
+    ...extra,
+    ...(authToken.value ? { Authorization: `Bearer ${authToken.value}` } : {}),
+  };
+}
+
+async function submitAuth() {
+  authLoading.value = true;
+  authError.value = "";
+  try {
+    const endpoint = authMode.value === "register" ? "/api/auth/register" : "/api/auth/login";
+    const payload =
+      authMode.value === "register"
+        ? { name: authForm.name, email: authForm.email, password: authForm.password }
+        : { email: authForm.email, password: authForm.password };
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "登录失败，请检查账号信息。");
+    }
+    currentUser.value = data.user;
+    authToken.value = data.token;
+    localStorage.setItem("lessonPrepAuth", JSON.stringify({ user: data.user, token: data.token }));
+  } catch (err) {
+    authError.value = err instanceof Error ? err.message : "登录失败，请稍后重试。";
+  } finally {
+    authLoading.value = false;
+  }
+}
+
+function logout() {
+  currentUser.value = null;
+  authToken.value = "";
+  localStorage.removeItem("lessonPrepAuth");
+}
+
+async function verifyStoredAuth() {
+  if (!authToken.value) return;
+  try {
+    const response = await fetch("/api/auth/me", {
+      headers: authHeaders(),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "登录已失效");
+    currentUser.value = data.user;
+    localStorage.setItem("lessonPrepAuth", JSON.stringify({ user: data.user, token: authToken.value }));
+  } catch {
+    logout();
+  }
+}
+
 function startTask(task) {
   stopTask();
   const queuedTask = createTask(task, taskTitleByType(task));
@@ -240,6 +309,7 @@ function stopTask(finalDetail = "", status = "done") {
   activeTaskId.value = "";
 }
 
+onMounted(() => verifyStoredAuth());
 onUnmounted(() => stopTask());
 
 function taskTitleByType(task) {
@@ -297,7 +367,7 @@ async function uploadReferenceFiles(event, sourceArea) {
       const fileBase64 = await fileToBase64(file);
       const response = await fetch("/api/parse-attachment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           fileName: file.name,
           sourceArea,
@@ -363,7 +433,7 @@ async function uploadSchoolResources(event) {
       const fileBase64 = await fileToBase64(file);
       const response = await fetch("/api/parse-attachment", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           fileName: file.name,
           sourceArea: "校本资源库",
@@ -526,7 +596,7 @@ async function inspectPptxTemplateFile(file) {
   const base64 = await fileToBase64(file);
   const response = await fetch("/api/inspect-pptx-template", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       fileName: file.name,
       templateBase64: base64,
@@ -576,7 +646,7 @@ async function generateLesson() {
   try {
     const response = await fetch("/api/generate-lesson", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...form,
         apiConfig,
@@ -640,7 +710,7 @@ async function generatePptOutline() {
   try {
     const response = await fetch("/api/generate-ppt-outline", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...form,
         apiConfig,
@@ -675,7 +745,7 @@ async function downloadPptx() {
   try {
     const response = await fetch("/api/export-pptx", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         outline: pptOutline.value,
         templateBase64: pptTemplate.base64,
@@ -717,7 +787,7 @@ async function regenerateSection() {
   try {
     const response = await fetch("/api/regenerate-section", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...form,
         apiConfig,
@@ -749,7 +819,53 @@ async function regenerateSection() {
 
 <template>
   <main class="app-shell">
-    <section class="workspace">
+    <section v-if="!isAuthenticated" class="auth-shell">
+      <div class="auth-card">
+        <div class="brand-row">
+          <div class="logo-mark">备</div>
+          <div>
+            <p class="eyebrow">中小学教师场景</p>
+            <h1>AI备课辅助工具</h1>
+          </div>
+        </div>
+        <div class="auth-tabs">
+          <button type="button" :class="{ selected: authMode === 'login' }" @click="authMode = 'login'">
+            登录
+          </button>
+          <button type="button" :class="{ selected: authMode === 'register' }" @click="authMode = 'register'">
+            注册
+          </button>
+        </div>
+        <form class="auth-form" @submit.prevent="submitAuth">
+          <label v-if="authMode === 'register'">
+            <span>姓名</span>
+            <input v-model="authForm.name" autocomplete="name" placeholder="如：张老师" />
+          </label>
+          <label>
+            <span>邮箱</span>
+            <input v-model="authForm.email" type="email" autocomplete="email" placeholder="teacher@example.com" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              v-model="authForm.password"
+              type="password"
+              autocomplete="current-password"
+              placeholder="至少 8 位"
+            />
+          </label>
+          <button class="primary" type="submit" :disabled="authLoading">
+            {{ authLoading ? "处理中..." : authMode === "register" ? "创建账号" : "登录" }}
+          </button>
+        </form>
+        <p v-if="authError" class="error-message">{{ authError }}</p>
+        <p class="config-note">
+          账号数据保存在本地后端的 <code>data/users.json</code>，适合 Demo 演示；正式部署应替换为数据库和统一身份认证。
+        </p>
+      </div>
+    </section>
+
+    <section v-else class="workspace">
       <aside class="prep-panel">
         <div class="brand-row">
           <div class="logo-mark">备</div>
@@ -760,6 +876,10 @@ async function regenerateSection() {
           <button class="config-toggle" type="button" @click="showApiConfig = !showApiConfig">
             模型配置
           </button>
+        </div>
+        <div class="user-bar">
+          <span>{{ currentUser?.name }} · {{ currentUser?.email }}</span>
+          <button type="button" @click="logout">退出</button>
         </div>
 
         <section v-if="showApiConfig" class="api-config">

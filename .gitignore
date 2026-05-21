@@ -64,6 +64,7 @@ coverage/
 # Project specific
 /TempBackEnd/
 .candidates/
+data/
 
 # Vite specific
 vite.config.js.timestamp-*

@@ -51,6 +51,50 @@ button:disabled {
   max-width: 1280px;
 }
 
+.auth-shell {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: calc(100vh - 48px);
+}
+
+.auth-card {
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgb(15 23 42 / 8%);
+  display: grid;
+  gap: 18px;
+  max-width: 460px;
+  padding: 28px;
+  width: 100%;
+}
+
+.auth-tabs {
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+}
+
+.auth-tabs button {
+  border: 0;
+  min-height: 38px;
+}
+
+.auth-tabs button.selected {
+  background: #1d4ed8;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
 .prep-panel,
 .result-panel {
   background: #ffffff;
@@ -108,6 +152,32 @@ button:disabled {
   gap: 12px;
   margin: -8px 0 22px;
   padding: 16px;
+}
+
+.user-bar {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin: -10px 0 18px;
+  padding: 10px 12px;
+}
+
+.user-bar span {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-bar button {
+  min-height: 32px;
+  padding: 0 10px;
 }
 
 .config-note {

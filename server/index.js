@@ -4,6 +4,7 @@ import cors from "cors";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { createAuthService } from "./authService.js";
 import { buildLessonPrompt, getSystemPrompt, validateLessonRequest } from "./lessonPrompt.js";
 import { resolveModelConfig } from "./modelConfig.js";
 import { pipeOpenAIStream } from "./openAIStream.js";
@@ -19,6 +20,7 @@ import {
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const authService = createAuthService();
 
 app.use(cors());
 app.use(express.json({ limit: "25mb" }));
@@ -26,6 +28,34 @@ app.use(express.json({ limit: "25mb" }));
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
+
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const result = await authService.register(req.body);
+    return res.json(result);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error instanceof Error ? error.message : "注册失败，请稍后重试。",
+    });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const result = await authService.login(req.body);
+    return res.json(result);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error instanceof Error ? error.message : "登录失败，请稍后重试。",
+    });
+  }
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.use("/api", requireAuth);
 
 app.post("/api/generate-lesson", async (req, res) => {
   const errors = validateLessonRequest(req.body);
@@ -79,6 +109,27 @@ app.post("/api/generate-lesson", async (req, res) => {
     });
   }
 });
+
+async function requireAuth(req, res, next) {
+  const token = getBearerToken(req);
+  if (!token) {
+    return res.status(401).json({ error: "请先登录。" });
+  }
+  try {
+    req.user = await authService.verifyToken(token);
+    return next();
+  } catch (error) {
+    return res.status(error.statusCode || 401).json({
+      error: error instanceof Error ? error.message : "请先登录。",
+    });
+  }
+}
+
+function getBearerToken(req) {
+  const header = String(req.headers.authorization || "");
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
 
 app.post("/api/generate-ppt-outline", async (req, res) => {
   const errors = validateLessonRequest(req.body);
