@@ -1,4 +1,5 @@
 import { buildAttachmentsContext } from "./attachmentsContext.js";
+import { buildSchoolRagContext } from "./schoolRag.js";
 
 export function buildPptOutlinePrompt(input) {
   const lessonContent = String(input.lessonContent || "").slice(0, 12000);
@@ -10,6 +11,10 @@ export function buildPptOutlinePrompt(input) {
   const attachmentsContext = buildAttachmentsContext(input.attachmentsContext, {
     maxItems: 6,
     maxTextLength: 3000,
+  });
+  const schoolRagContext = buildSchoolRagContext(input.schoolResources, input, {
+    limit: 4,
+    chunkSize: 700,
   });
 
   return `请根据以下教案与课堂信息，生成一套中小学课堂教学 PPT 大纲。
@@ -25,6 +30,7 @@ export function buildPptOutlinePrompt(input) {
 - 可选生成项：${featureTags}
 - 自定义生成要求：${customFeatureTags}
 - 学情补充：${input.studentContext || "未提供"}
+${schoolRagContext ? `\n${schoolRagContext}` : ""}
 ${attachmentsContext ? `\n${attachmentsContext}` : ""}
 
 教案内容：

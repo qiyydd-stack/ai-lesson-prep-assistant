@@ -516,7 +516,8 @@ textarea:focus {
 }
 
 .ppt-template-panel,
-.template-import-block {
+.template-import-block,
+.resource-library-block {
   background: #f8fafc;
   border: 1px solid #dbe3ef;
   border-radius: 8px;
@@ -528,6 +529,62 @@ textarea:focus {
 
 .ppt-template-panel h3 {
   font-size: 17px;
+}
+
+.resource-library-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resource-library-header > span {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.resource-library-header button {
+  min-height: 32px;
+}
+
+.resource-list {
+  display: grid;
+  gap: 8px;
+}
+
+.resource-item {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+}
+
+.resource-item.parsing {
+  border-color: #93c5fd;
+}
+
+.resource-item.error {
+  border-color: #fecdd3;
+}
+
+.resource-item strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.resource-item p {
+  color: #64748b;
+  font-size: 13px;
+  margin: 3px 0 0;
+}
+
+.resource-item button {
+  min-height: 32px;
 }
 
 .template-upload-row {

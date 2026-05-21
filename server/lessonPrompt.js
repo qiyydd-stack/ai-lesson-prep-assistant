@@ -1,4 +1,5 @@
 import { buildAttachmentsContext } from "./attachmentsContext.js";
+import { buildSchoolRagContext } from "./schoolRag.js";
 
 const REQUIRED_FIELDS = ["subject", "grade", "chapter", "duration", "teachingType", "teachingStyle"];
 
@@ -92,6 +93,7 @@ export function buildLessonPrompt(input) {
   const customFeatureTags = String(input.customFeatureTags || "").trim();
   const schoolTemplate = String(input.schoolTemplate || "").trim();
   const attachmentsContext = buildAttachmentsContext(input.attachmentsContext);
+  const schoolRagContext = buildSchoolRagContext(input.schoolResources, input);
   const teachingType = String(input.teachingType || "").trim();
   const teachingStyle = String(input.teachingStyle || "").trim();
   const customTeachingType = String(input.customTeachingType || "").trim();
@@ -120,6 +122,7 @@ export function buildLessonPrompt(input) {
 - 自定义生成要求：${customFeatureTags || "无"}
 - 学情补充：${studentContext}
 ${schoolTemplate ? `\n校本模板（请优先参照其栏目结构和表达习惯）：\n${schoolTemplate.slice(0, 6000)}\n` : ""}
+${schoolRagContext ? `\n${schoolRagContext}\n` : ""}
 ${attachmentsContext ? `\n${attachmentsContext}\n` : ""}
 
 请使用简体中文，贴近中小学教师真实备课表达，避免空泛口号。输出 Markdown，必须包含以下一级标题：

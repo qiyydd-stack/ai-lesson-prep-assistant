@@ -85,6 +85,27 @@ test("buildLessonPrompt includes extracted attachment context", () => {
   assert.match(prompt, /解方程 2x\+3=7/);
 });
 
+test("buildLessonPrompt includes retrieved school RAG context", () => {
+  const prompt = buildLessonPrompt({
+    subject: "数学",
+    grade: "七年级",
+    chapter: "一元一次方程",
+    duration: "1课时",
+    teachingType: "习题课",
+    teachingStyle: "严谨清晰",
+    schoolResources: [
+      {
+        name: "七年级数学校本题库.docx",
+        extractedText: "一元一次方程分层作业：基础题、提升题、拓展题。",
+      },
+    ],
+  });
+
+  assert.match(prompt, /校本资源库检索结果/);
+  assert.match(prompt, /七年级数学校本题库\.docx/);
+  assert.match(prompt, /分层作业/);
+});
+
 test("getTeachingTypePrompt returns exam review guidance", () => {
   const prompt = getTeachingTypePrompt({ teachingType: "考前复习课" });
 

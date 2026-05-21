@@ -96,6 +96,7 @@ const form = reactive({
 });
 
 const savedApiConfig = JSON.parse(localStorage.getItem("lessonPrepApiConfig") || "{}");
+const savedSchoolResources = JSON.parse(localStorage.getItem("lessonPrepSchoolResources") || "[]");
 
 const apiConfig = reactive({
   apiKey: savedApiConfig.apiKey || "",
@@ -111,7 +112,9 @@ const lessonBlocks = ref([]);
 const activeBlockTitle = ref("");
 const copied = ref(false);
 const attachments = ref([]);
+const schoolResources = ref(Array.isArray(savedSchoolResources) ? savedSchoolResources : []);
 const attachmentError = ref("");
+const schoolResourceError = ref("");
 const pptLoading = ref(false);
 const pptDownloading = ref(false);
 const pptError = ref("");
@@ -179,6 +182,17 @@ const parsedAttachmentContexts = computed(() =>
       sourceArea: attachment.sourceArea,
       summary: attachment.summary,
       extractedText: attachment.extractedText,
+    })),
+);
+
+const activeSchoolResources = computed(() =>
+  schoolResources.value
+    .filter((resource) => resource.status === "done" && resource.extractedText)
+    .map((resource) => ({
+      name: resource.name,
+      sourceArea: "校本资源库",
+      summary: resource.summary,
+      extractedText: resource.extractedText,
     })),
 );
 
@@ -324,6 +338,83 @@ function removeAttachment(id) {
 
 function attachmentsByArea(sourceArea) {
   return attachments.value.filter((attachment) => attachment.sourceArea === sourceArea);
+}
+
+async function uploadSchoolResources(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  schoolResourceError.value = "";
+
+  for (const file of files) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    schoolResources.value = [
+      {
+        id,
+        name: file.name,
+        status: "parsing",
+        summary: "",
+        extractedText: "",
+        error: "",
+      },
+      ...schoolResources.value,
+    ];
+
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const response = await fetch("/api/parse-attachment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          sourceArea: "校本资源库",
+          fileBase64,
+          apiConfig,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "校本资源解析失败，请换一个文件重试。");
+      }
+      const parsed = data.attachment || {};
+      schoolResources.value = schoolResources.value.map((resource) =>
+        resource.id === id
+          ? {
+              ...resource,
+              status: "done",
+              summary: parsed.summary || "",
+              extractedText: parsed.extractedText || "",
+            }
+          : resource,
+      );
+      persistSchoolResources();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "校本资源解析失败，请换一个文件重试。";
+      schoolResourceError.value = message;
+      schoolResources.value = schoolResources.value.map((resource) =>
+        resource.id === id ? { ...resource, status: "error", error: message } : resource,
+      );
+      persistSchoolResources();
+    }
+  }
+
+  event.target.value = "";
+}
+
+function removeSchoolResource(id) {
+  schoolResources.value = schoolResources.value.filter((resource) => resource.id !== id);
+  persistSchoolResources();
+}
+
+function clearSchoolResources() {
+  schoolResources.value = [];
+  persistSchoolResources();
+}
+
+function persistSchoolResources() {
+  const persisted = schoolResources.value
+    .filter((resource) => resource.status === "done")
+    .slice(0, 20);
+  localStorage.setItem("lessonPrepSchoolResources", JSON.stringify(persisted));
 }
 
 function fillExample() {
@@ -490,6 +581,7 @@ async function generateLesson() {
         ...form,
         apiConfig,
         attachmentsContext: parsedAttachmentContexts.value,
+        schoolResources: activeSchoolResources.value,
       }),
     });
 
@@ -554,6 +646,7 @@ async function generatePptOutline() {
         apiConfig,
         lessonContent: latestLessonMarkdown.value,
         attachmentsContext: parsedAttachmentContexts.value,
+        schoolResources: activeSchoolResources.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -632,6 +725,7 @@ async function regenerateSection() {
         extraInstruction: sectionForm.extraInstruction,
         lessonContent: latestLessonMarkdown.value,
         attachmentsContext: parsedAttachmentContexts.value,
+        schoolResources: activeSchoolResources.value,
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -884,6 +978,49 @@ async function regenerateSection() {
                 @change="uploadReferenceFiles($event, '模板导入')"
               />
             </div>
+          </section>
+
+          <section class="wide option-block resource-library-block">
+            <div class="resource-library-header">
+              <span>校本资源库 / RAG</span>
+              <button type="button" :disabled="!schoolResources.length" @click="clearSchoolResources">
+                清空资源库
+              </button>
+            </div>
+            <p class="config-note">
+              上传校本题库、优秀教案、课标摘录、教研资料等。生成时会按学科、年级、章节自动检索相关片段。
+            </p>
+            <div class="attachment-panel compact">
+              <span>导入校本资源</span>
+              <input
+                type="file"
+                multiple
+                :accept="attachmentAccept"
+                @change="uploadSchoolResources"
+              />
+            </div>
+            <div v-if="schoolResources.length" class="resource-list">
+              <article
+                v-for="resource in schoolResources"
+                :key="resource.id"
+                :class="['resource-item', resource.status]"
+              >
+                <div>
+                  <strong>{{ resource.name }}</strong>
+                  <p>
+                    {{
+                      resource.status === "parsing"
+                        ? "解析中"
+                        : resource.status === "done"
+                          ? resource.summary || "已入库"
+                          : resource.error
+                    }}
+                  </p>
+                </div>
+                <button type="button" @click="removeSchoolResource(resource.id)">移除</button>
+              </article>
+            </div>
+            <p v-if="schoolResourceError" class="error-message">{{ schoolResourceError }}</p>
           </section>
 
           <section v-if="attachments.length" class="wide attachment-list">

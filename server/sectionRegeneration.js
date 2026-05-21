@@ -1,6 +1,7 @@
 const REQUIRED_FIELDS = ["sectionTitle", "lessonContent"];
 
 import { buildAttachmentsContext } from "./attachmentsContext.js";
+import { buildSchoolRagContext } from "./schoolRag.js";
 
 export function validateSectionRegenerationRequest(input) {
   return REQUIRED_FIELDS.filter((field) => !String(input?.[field] ?? "").trim()).map(
@@ -15,6 +16,10 @@ export function buildSectionRegenerationPrompt(input) {
     maxItems: 6,
     maxTextLength: 4000,
   });
+  const schoolRagContext = buildSchoolRagContext(input.schoolResources, input, {
+    limit: 4,
+    chunkSize: 700,
+  });
 
   return `请只重写下列教案中的一个章节：${input.sectionTitle}
 
@@ -25,6 +30,7 @@ export function buildSectionRegenerationPrompt(input) {
 
 重写要求：
 ${extraInstruction}
+${schoolRagContext ? `\n${schoolRagContext}\n` : ""}
 ${attachmentsContext ? `\n${attachmentsContext}\n` : ""}
 
 原教案：

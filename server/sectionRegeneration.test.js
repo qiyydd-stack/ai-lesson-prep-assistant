@@ -49,3 +49,23 @@ test("buildSectionRegenerationPrompt includes attachment context for the rewritt
   assert.match(prompt, /练习册照片\.jpg/);
   assert.match(prompt, /甲数比乙数多 5/);
 });
+
+test("buildSectionRegenerationPrompt includes retrieved school resources", () => {
+  const prompt = buildSectionRegenerationPrompt({
+    subject: "数学",
+    grade: "七年级",
+    chapter: "一元一次方程",
+    sectionTitle: "课后作业题",
+    lessonContent: "# 课后作业题\n旧作业",
+    schoolResources: [
+      {
+        name: "校本题库.xlsx",
+        extractedText: "一元一次方程课后分层练习：移项、去括号、应用题。",
+      },
+    ],
+  });
+
+  assert.match(prompt, /校本资源库检索结果/);
+  assert.match(prompt, /校本题库\.xlsx/);
+  assert.match(prompt, /应用题/);
+});
