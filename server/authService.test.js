@@ -5,15 +5,18 @@ import os from "node:os";
 import path from "node:path";
 
 import { createAuthService } from "./authService.js";
+import { createDatabase } from "./database.js";
 
 async function withAuthService(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "lesson-auth-"));
   try {
+    const db = createDatabase({ dbPath: path.join(dir, "app.db") });
     const auth = createAuthService({
-      storagePath: path.join(dir, "users.json"),
+      db,
       tokenSecret: "test-secret",
     });
     await fn(auth);
+    db.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

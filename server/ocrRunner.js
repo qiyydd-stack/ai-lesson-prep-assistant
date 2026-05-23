@@ -14,7 +14,8 @@ export async function runLocalOcr({ buffer, extension }) {
   try {
     await fs.writeFile(tempPath, buffer);
     const scriptPath = path.resolve(process.cwd(), "server", "ocr", "recognize.py");
-    const { stdout } = await execFileAsync("python", [scriptPath, tempPath], {
+    const pythonBin = process.env.PYTHON_BIN || "python";
+    const { stdout } = await execFileAsync(pythonBin, [scriptPath, tempPath], {
       timeout: 60000,
       maxBuffer: 1024 * 1024 * 4,
       windowsHide: true,

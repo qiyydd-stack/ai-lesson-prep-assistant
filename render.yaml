@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: ai-lesson-prep-assistant
+    env: docker
+    plan: free
+    autoDeploy: false
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: SQLITE_DB_PATH
+        value: /app/data/app.db
+      - key: PYTHON_BIN
+        value: python3
+      - key: AUTH_TOKEN_SECRET
+        generateValue: true
+      - key: OPENAI_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini

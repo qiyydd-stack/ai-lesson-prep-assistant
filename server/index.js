@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { createAuthService } from "./authService.js";
+import { createDatabase } from "./database.js";
+import { createLessonStore } from "./lessonStore.js";
 import { buildLessonPrompt, getSystemPrompt, validateLessonRequest } from "./lessonPrompt.js";
 import { resolveModelConfig } from "./modelConfig.js";
 import { pipeOpenAIStream } from "./openAIStream.js";
@@ -20,7 +22,9 @@ import {
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
-const authService = createAuthService();
+const db = createDatabase();
+const authService = createAuthService({ db });
+const lessonStore = createLessonStore(db);
 
 app.use(cors());
 app.use(express.json({ limit: "25mb" }));
@@ -56,6 +60,52 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
 });
 
 app.use("/api", requireAuth);
+
+app.get("/api/lessons", (req, res) => {
+  res.json({ lessons: lessonStore.listLessons(req.user.id) });
+});
+
+app.post("/api/lessons", (req, res) => {
+  try {
+    const lesson = lessonStore.saveLesson(req.user.id, req.body);
+    return res.json({ lesson });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error instanceof Error ? error.message : "教案保存失败，请稍后重试。",
+    });
+  }
+});
+
+app.get("/api/lessons/:id", (req, res) => {
+  const lesson = lessonStore.getLesson(req.user.id, req.params.id);
+  if (!lesson) return res.status(404).json({ error: "教案不存在。" });
+  return res.json({ lesson });
+});
+
+app.delete("/api/lessons/:id", (req, res) => {
+  const deleted = lessonStore.deleteLesson(req.user.id, req.params.id);
+  return res.json({ deleted });
+});
+
+app.get("/api/school-resources", (req, res) => {
+  res.json({ resources: lessonStore.listSchoolResources(req.user.id) });
+});
+
+app.post("/api/school-resources", (req, res) => {
+  try {
+    const resource = lessonStore.saveSchoolResource(req.user.id, req.body);
+    return res.json({ resource });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      error: error instanceof Error ? error.message : "校本资源保存失败，请稍后重试。",
+    });
+  }
+});
+
+app.delete("/api/school-resources/:id", (req, res) => {
+  const deleted = lessonStore.deleteSchoolResource(req.user.id, req.params.id);
+  return res.json({ deleted });
+});
 
 app.post("/api/generate-lesson", async (req, res) => {
   const errors = validateLessonRequest(req.body);

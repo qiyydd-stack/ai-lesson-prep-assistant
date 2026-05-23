@@ -96,7 +96,6 @@ const form = reactive({
 });
 
 const savedApiConfig = JSON.parse(localStorage.getItem("lessonPrepApiConfig") || "{}");
-const savedSchoolResources = JSON.parse(localStorage.getItem("lessonPrepSchoolResources") || "[]");
 const savedAuth = JSON.parse(localStorage.getItem("lessonPrepAuth") || "{}");
 
 const apiConfig = reactive({
@@ -123,7 +122,11 @@ const lessonBlocks = ref([]);
 const activeBlockTitle = ref("");
 const copied = ref(false);
 const attachments = ref([]);
-const schoolResources = ref(Array.isArray(savedSchoolResources) ? savedSchoolResources : []);
+const schoolResources = ref([]);
+const savedLessons = ref([]);
+const currentLessonId = ref("");
+const lessonStoreError = ref("");
+const lessonSaving = ref(false);
 const attachmentError = ref("");
 const schoolResourceError = ref("");
 const pptLoading = ref(false);
@@ -200,12 +203,15 @@ const parsedAttachmentContexts = computed(() =>
 
 const activeSchoolResources = computed(() =>
   schoolResources.value
-    .filter((resource) => resource.status === "done" && resource.extractedText)
+    .filter((resource) => resource.status !== "error" && resource.status !== "parsing" && resource.extractedText)
     .map((resource) => ({
+      id: resource.id,
       name: resource.name,
       sourceArea: "校本资源库",
       summary: resource.summary,
       extractedText: resource.extractedText,
+      chunks: resource.chunks || [],
+      chunkCount: resource.chunkCount || 0,
     })),
 );
 
@@ -250,6 +256,7 @@ async function submitAuth() {
     currentUser.value = data.user;
     authToken.value = data.token;
     localStorage.setItem("lessonPrepAuth", JSON.stringify({ user: data.user, token: data.token }));
+    await Promise.all([fetchSavedLessons(), fetchSchoolResources()]);
   } catch (err) {
     authError.value = err instanceof Error ? err.message : "登录失败，请稍后重试。";
   } finally {
@@ -261,6 +268,9 @@ function logout() {
   currentUser.value = null;
   authToken.value = "";
   localStorage.removeItem("lessonPrepAuth");
+  savedLessons.value = [];
+  schoolResources.value = [];
+  currentLessonId.value = "";
 }
 
 async function verifyStoredAuth() {
@@ -273,6 +283,7 @@ async function verifyStoredAuth() {
     if (!response.ok) throw new Error(data.error || "登录已失效");
     currentUser.value = data.user;
     localStorage.setItem("lessonPrepAuth", JSON.stringify({ user: data.user, token: authToken.value }));
+    await Promise.all([fetchSavedLessons(), fetchSchoolResources()]);
   } catch {
     logout();
   }
@@ -410,6 +421,85 @@ function attachmentsByArea(sourceArea) {
   return attachments.value.filter((attachment) => attachment.sourceArea === sourceArea);
 }
 
+async function fetchSavedLessons() {
+  if (!authToken.value) return;
+  const response = await fetch("/api/lessons", { headers: authHeaders() });
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) savedLessons.value = data.lessons || [];
+}
+
+async function saveCurrentLesson() {
+  if (!latestLessonMarkdown.value) {
+    lessonStoreError.value = "请先生成或载入教案。";
+    return;
+  }
+  lessonSaving.value = true;
+  lessonStoreError.value = "";
+  try {
+    const response = await fetch("/api/lessons", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        id: currentLessonId.value || undefined,
+        title: `${form.grade || ""}${form.subject || ""} ${form.chapter || "未命名教案"}`.trim(),
+        subject: form.subject,
+        grade: form.grade,
+        chapter: form.chapter,
+        content: latestLessonMarkdown.value,
+        form: JSON.parse(JSON.stringify(form)),
+        pptOutline: pptOutline.value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "教案保存失败。");
+    currentLessonId.value = data.lesson.id;
+    await fetchSavedLessons();
+  } catch (err) {
+    lessonStoreError.value = err instanceof Error ? err.message : "教案保存失败，请稍后重试。";
+  } finally {
+    lessonSaving.value = false;
+  }
+}
+
+async function loadSavedLesson(id) {
+  lessonStoreError.value = "";
+  try {
+    const response = await fetch(`/api/lessons/${id}`, { headers: authHeaders() });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "教案载入失败。");
+    const lesson = data.lesson;
+    Object.assign(form, {
+      ...form,
+      ...(lesson.form || {}),
+    });
+    result.value = lesson.content || "";
+    syncLessonBlocksFromMarkdown(result.value);
+    pptOutline.value = lesson.pptOutline || null;
+    currentLessonId.value = lesson.id;
+    taskDetail.value = `已载入：${lesson.title}`;
+  } catch (err) {
+    lessonStoreError.value = err instanceof Error ? err.message : "教案载入失败，请稍后重试。";
+  }
+}
+
+async function deleteSavedLesson(id) {
+  const response = await fetch(`/api/lessons/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (response.ok) {
+    if (currentLessonId.value === id) currentLessonId.value = "";
+    await fetchSavedLessons();
+  }
+}
+
+async function fetchSchoolResources() {
+  if (!authToken.value) return;
+  const response = await fetch("/api/school-resources", { headers: authHeaders() });
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) schoolResources.value = data.resources || [];
+}
+
 async function uploadSchoolResources(event) {
   const files = Array.from(event.target.files || []);
   if (!files.length) return;
@@ -446,24 +536,26 @@ async function uploadSchoolResources(event) {
         throw new Error(data.error || "校本资源解析失败，请换一个文件重试。");
       }
       const parsed = data.attachment || {};
+      const saveResponse = await fetch("/api/school-resources", {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          name: parsed.name || file.name,
+          summary: parsed.summary || "",
+          extractedText: parsed.extractedText || "",
+        }),
+      });
+      const savedData = await saveResponse.json().catch(() => ({}));
+      if (!saveResponse.ok) throw new Error(savedData.error || "校本资源保存失败。");
       schoolResources.value = schoolResources.value.map((resource) =>
-        resource.id === id
-          ? {
-              ...resource,
-              status: "done",
-              summary: parsed.summary || "",
-              extractedText: parsed.extractedText || "",
-            }
-          : resource,
+        resource.id === id ? { ...savedData.resource, status: "done" } : resource,
       );
-      persistSchoolResources();
     } catch (err) {
       const message = err instanceof Error ? err.message : "校本资源解析失败，请换一个文件重试。";
       schoolResourceError.value = message;
       schoolResources.value = schoolResources.value.map((resource) =>
         resource.id === id ? { ...resource, status: "error", error: message } : resource,
       );
-      persistSchoolResources();
     }
   }
 
@@ -471,20 +563,18 @@ async function uploadSchoolResources(event) {
 }
 
 function removeSchoolResource(id) {
-  schoolResources.value = schoolResources.value.filter((resource) => resource.id !== id);
-  persistSchoolResources();
+  fetch(`/api/school-resources/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  }).finally(() => {
+    schoolResources.value = schoolResources.value.filter((resource) => resource.id !== id);
+  });
 }
 
 function clearSchoolResources() {
-  schoolResources.value = [];
-  persistSchoolResources();
-}
-
-function persistSchoolResources() {
-  const persisted = schoolResources.value
-    .filter((resource) => resource.status === "done")
-    .slice(0, 20);
-  localStorage.setItem("lessonPrepSchoolResources", JSON.stringify(persisted));
+  for (const resource of schoolResources.value) {
+    if (resource.id) removeSchoolResource(resource.id);
+  }
 }
 
 function fillExample() {
@@ -1131,7 +1221,7 @@ async function regenerateSection() {
                     {{
                       resource.status === "parsing"
                         ? "解析中"
-                        : resource.status === "done"
+                        : resource.status !== "error"
                           ? resource.summary || "已入库"
                           : resource.error
                     }}
@@ -1217,6 +1307,32 @@ async function regenerateSection() {
               <span>{{ task.status === "running" ? "进行中" : task.status === "done" ? "完成" : "失败" }}</span>
             </article>
           </div>
+        </section>
+
+        <section class="lesson-library">
+          <div class="lesson-library-header">
+            <div>
+              <p class="eyebrow">我的教案</p>
+              <h3>保存与继续编辑</h3>
+            </div>
+            <button type="button" :disabled="lessonSaving || !latestLessonMarkdown" @click="saveCurrentLesson">
+              {{ lessonSaving ? "保存中..." : currentLessonId ? "更新教案" : "保存教案" }}
+            </button>
+          </div>
+          <p v-if="lessonStoreError" class="error-message">{{ lessonStoreError }}</p>
+          <div v-if="savedLessons.length" class="lesson-list">
+            <article v-for="lesson in savedLessons" :key="lesson.id" class="lesson-list-item">
+              <div>
+                <strong>{{ lesson.title }}</strong>
+                <p>{{ lesson.subject || "未填学科" }} · {{ lesson.grade || "未填年级" }} · {{ lesson.chapter || "未填章节" }}</p>
+              </div>
+              <div>
+                <button type="button" @click="loadSavedLesson(lesson.id)">打开</button>
+                <button type="button" @click="deleteSavedLesson(lesson.id)">删除</button>
+              </div>
+            </article>
+          </div>
+          <p v-else class="library-empty">还没有保存的教案。</p>
         </section>
 
         <template v-if="latestLessonMarkdown">

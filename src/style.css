@@ -429,7 +429,8 @@ textarea:focus {
 }
 
 .task-queue,
-.content-workbench {
+.content-workbench,
+.lesson-library {
   border: 1px solid #dbe3ef;
   border-radius: 8px;
   margin-top: 18px;
@@ -441,6 +442,7 @@ textarea:focus {
 }
 
 .task-queue-header,
+.lesson-library-header,
 .workbench-header,
 .block-editor-header {
   align-items: center;
@@ -453,6 +455,49 @@ textarea:focus {
 .workbench-header span {
   color: #64748b;
   font-size: 13px;
+}
+
+.lesson-library-header h3 {
+  font-size: 17px;
+}
+
+.lesson-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lesson-list-item {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.lesson-list-item strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.lesson-list-item p,
+.library-empty {
+  color: #64748b;
+  font-size: 13px;
+  margin: 3px 0 0;
+}
+
+.lesson-list-item > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.lesson-list-item button {
+  min-height: 32px;
+  padding: 0 10px;
 }
 
 .task-list {

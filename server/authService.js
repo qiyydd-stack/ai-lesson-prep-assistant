@@ -1,12 +1,12 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, createHmac } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { promisify } from "node:util";
+
+import { createDatabase } from "./database.js";
 
 const scrypt = promisify(scryptCallback);
 
 export function createAuthService(options = {}) {
-  const storagePath = options.storagePath || path.resolve(process.cwd(), "data", "users.json");
+  const db = options.db || createDatabase({ dbPath: options.dbPath });
   const tokenSecret = options.tokenSecret || process.env.AUTH_TOKEN_SECRET || "lesson-prep-dev-secret";
 
   async function register(input) {
@@ -15,8 +15,7 @@ export function createAuthService(options = {}) {
     const password = String(input?.password || "");
     validateRegisterInput({ name, email, password });
 
-    const store = await readStore(storagePath);
-    if (store.users.some((user) => user.email === email)) {
+    if (db.prepare("select id from users where email = ?").get(email)) {
       throw withStatus(new Error("该邮箱已注册。"), 409);
     }
 
@@ -27,8 +26,9 @@ export function createAuthService(options = {}) {
       passwordHash: await hashPassword(password),
       createdAt: new Date().toISOString(),
     };
-    store.users.push(user);
-    await writeStore(storagePath, store);
+    db.prepare(
+      "insert into users (id, name, email, password_hash, created_at) values (?, ?, ?, ?, ?)",
+    ).run(user.id, user.name, user.email, user.passwordHash, user.createdAt);
 
     return {
       user: publicUser(user),
@@ -39,8 +39,7 @@ export function createAuthService(options = {}) {
   async function login(input) {
     const email = normalizeEmail(input?.email);
     const password = String(input?.password || "");
-    const store = await readStore(storagePath);
-    const user = store.users.find((item) => item.email === email);
+    const user = mapUserRow(db.prepare("select * from users where email = ?").get(email));
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       throw withStatus(new Error("邮箱或密码错误。"), 401);
     }
@@ -53,8 +52,7 @@ export function createAuthService(options = {}) {
 
   async function verifyToken(token) {
     const payload = verifySignedToken(token, tokenSecret);
-    const store = await readStore(storagePath);
-    const user = store.users.find((item) => item.id === payload.userId);
+    const user = mapUserRow(db.prepare("select * from users where id = ?").get(payload.userId));
     if (!user) {
       throw withStatus(new Error("登录状态已失效，请重新登录。"), 401);
     }
@@ -72,22 +70,6 @@ function validateRegisterInput({ name, email, password }) {
   if (password.length < 8) {
     throw withStatus(new Error("密码至少 8 位。"), 400);
   }
-}
-
-async function readStore(storagePath) {
-  try {
-    const raw = await fs.readFile(storagePath, "utf8");
-    const parsed = JSON.parse(raw);
-    return { users: Array.isArray(parsed.users) ? parsed.users : [] };
-  } catch (error) {
-    if (error.code === "ENOENT") return { users: [] };
-    throw error;
-  }
-}
-
-async function writeStore(storagePath, store) {
-  await fs.mkdir(path.dirname(storagePath), { recursive: true });
-  await fs.writeFile(storagePath, `${JSON.stringify(store, null, 2)}\n`, "utf8");
 }
 
 async function hashPassword(password) {
@@ -148,6 +130,17 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     createdAt: user.createdAt,
+  };
+}
+
+function mapUserRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    passwordHash: row.password_hash,
+    createdAt: row.created_at,
   };
 }
 
